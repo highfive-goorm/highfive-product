@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
+
 class ProductBase(BaseModel):
     name: str
     price: int
@@ -21,8 +22,10 @@ class ProductBase(BaseModel):
     hits: Optional[str] = None
     ori_price: Optional[int] = None
 
+
 class ProductCreate(ProductBase):
     created_at: datetime
+
 
 class Product(ProductBase):
     id: int

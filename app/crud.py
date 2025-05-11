@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from datetime import datetime
 
+from motor.motor_asyncio import AsyncIOMotorCollection
+
 
 async def create_product(db: Session, product: schemas.ProductCreate):
     product = models.Product(**product.dict(), created_at=datetime.now())
@@ -11,28 +13,23 @@ async def create_product(db: Session, product: schemas.ProductCreate):
     return await product
 
 
-async def get_products(db: Session):
-    return await db.query(models.Product).all()
+async def get_products(collection: AsyncIOMotorCollection, keyword: str):
+    cursor = collection.find({"name": {"$regex": keyword, "$options": "i"}})
+    products = []
+    async for doc in cursor:
+        products.append(doc)
+    return products
 
 
-def get_product(db: Session, id: int):
-    return db.query(models.Product).filter(models.Product.id == id).first()
+async def get_product(collection: AsyncIOMotorCollection, id: int):
+    return await collection.find_one({"id": id})
 
 
-def update_product(db: Session, product_id: int, product: schemas.ProductCreate):
-    db_product = get_product(db, product_id)
-    if db_product:
-        for key, value in product.dict().items():
-            setattr(db_product, key, value)
-        db_product.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(db_product)
-    return db_product
+async def update_product(collection: AsyncIOMotorCollection, id: int, update_data: dict):
+    await collection.update_one({"id": id}, {"$set": update_data})
+    return await collection.find_one({"id": id})
 
 
-def delete_product(db: Session, product_id: int):
-    db_product = get_product(db, product_id)
-    if db_product:
-        db.delete(db_product)
-        db.commit()
-    return db_product
+async def delete_product(collection: AsyncIOMotorCollection,id:int):
+    result = await collection.delete_one({"id": id})
+    return {"deleted": result.deleted_count}
