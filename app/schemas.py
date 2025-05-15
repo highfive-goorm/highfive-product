@@ -1,54 +1,41 @@
-from bson import ObjectId
-from pydantic import BaseModel
-from typing import Optional, Union
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text
-from sqlalchemy.ext.declarative import declarative_base
+from typing import List, Optional
+from pydantic import BaseModel
 
 
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-
-
-Base = declarative_base()
-
-
+# 기존 ProductBase 스키마 예시
 class ProductBase(BaseModel):
-    id: Union[str, int]
-    name: str
-    discounted_price: Optional[int]
-    category_code: str
-    discount: Optional[int] = 0
-    purchase_total: Optional[int] = 0
-    major_category: Optional[str] =None
+    id: Optional[int]
+    name: Optional[str]
+    discounted_price: Optional[float]
+    category_code: Optional[str]
+    discount: Optional[float]
+    major_category: Optional[str]
     gender: Optional[str]
     img_url: Optional[str]
-    product_like: Optional[int] = 0
+    like_count: Optional[int]
+    view_count: Optional[int]
+    purchase_count:Optional[int]
     sub_category: Optional[str]
-
     rank: Optional[int]
-    price: Optional[int]
-
+    price: Optional[float]
     created_at: datetime
     updated_at: datetime
 
-    brand_id:Optional[int]=0
-    brand_kor:Optional[str]=''
-    brand_eng:Optional[str]=''
-    brand_like:Optional[int]=''
-class Brand(BaseModel):  # MySQL 테이블명
 
-    brand_id :Optional[str]
-    brand_kor :Optional[str]
-    brand_eng :Optional[str]
-    brand_like :Optional[int]
-    created_at :datetime
-    updated_at : datetime
+# 새로운 브랜드 관련 모델
+class Brand(BaseModel):
+    id: int
+    brand_kor: Optional[str]
+    brand_eng: Optional[str]
+    brand: Optional[str]
+    brand_likes: Optional[int]
+
+
+# 상품과 브랜드를 하나의 객체로 합친 모델
+class CombinedProduct(ProductBase, Brand):
+    """
+    ProductBase와 BrandModel을 상속받아
+    모든 필드를 하나의 모델로 담습니다.
+    """
+    pass

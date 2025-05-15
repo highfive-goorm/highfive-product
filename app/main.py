@@ -1,7 +1,7 @@
 from asyncio.log import logger
 from typing import List, Optional, Dict, Any, Union
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, Path
 from datetime import datetime
 from typing import List, Dict, Any, Any as TypingAny
 from fastapi.encoders import jsonable_encoder
@@ -11,7 +11,7 @@ from starlette import status
 from starlette.responses import JSONResponse
 
 from .database import MONGO_URI2
-from .schemas import ProductBase, Brand
+from .schemas import ProductBase, CombinedProduct, Brand
 
 app = FastAPI()
 
@@ -81,94 +81,115 @@ async def create_product(
 
 @app.get(
     "/product",
-    response_model=List[ProductBase],
+    response_model=List[CombinedProduct],
     status_code=status.HTTP_200_OK
 )
+@app.get("/product", response_model=List[CombinedProduct], status_code=status.HTTP_200_OK)
 async def list_products(
-    collection: AsyncIOMotorCollection = Depends(get_db),
-    brand_coll: AsyncIOMotorCollection = Depends(get_brand_db)
+        collection: AsyncIOMotorCollection = Depends(get_db),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db)
 ):
     """
-    모든 상품 문서와 브랜드 문서를 조회하여 브랜드 요소를 병합한 후 리스트로 반환합니다.
+    상품과 브랜드 컬렉션을 zip 으로 묶어 동시에 순회하며,
+    CombinedProduct 형태로 합쳐진 리스트를 반환합니다.
     """
-    if not collection or not brand_coll:
+    if collection is None or brand_coll is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="MongoDB 연결 오류"
         )
 
-    try:
-        products: List[ProductBase] = []
+    combined_list: List[CombinedProduct] = []
 
-        # 각 product 문서 순회
-        async for raw in collection.find({}):
-            # a) MongoDB _id → id
-            oid = raw.pop("_id", None)
-            raw_id: TypingAny = str(oid) if oid is not None else None
-            if isinstance(raw_id, str) and raw_id.isdigit():
-                raw_id = int(raw_id)
-            raw["id"] = raw_id
+    # 두 커서를 zip 으로 묶어 동시에 순회
+    raw_products = await collection.find({}).to_list(length=None)
+    raw_brands = await brand_coll.find({}).to_list(length=None)
 
-            # b) brand_id로 브랜드 문서 조회
-            b_id = raw.get("brand_id")
-            if isinstance(b_id, str) and b_id.isdigit():
-                b_id = int(b_id)
-            raw["brand_id"] = b_id
-            try:
-                brand_doc = await brand_coll.find_one({"brand_id": b_id})
-            except Exception as e:
-                logger.error(f"Brand lookup error for id {b_id}: {e}")
-                brand_doc = None
-            raw["brand"] = brand_doc.get("name") if brand_doc and "name" in brand_doc else None
+    # 2) 리스트를 zip으로 묶어 순회
+    for raw, br in zip(raw_products, raw_brands):
+        # 1) 상품 _id → id
+        oid = raw.pop("id", None)
+        prod_id: TypingAny = str(oid) if oid is not None else None
+        if isinstance(prod_id, str) and prod_id.isdigit():
+            prod_id = int(prod_id)
+        raw["id"] = prod_id
 
-            # c) 필드 필터링
-            filtered: Dict[str, TypingAny] = {k: raw.get(k) for k in ProductBase.__fields__.keys()}
+        # 2) 브랜드 _id → brand_id
+        bid = br.pop("id", None)
+        brand_id: TypingAny = bid if bid is not None else None
+        if isinstance(brand_id, str) and brand_id.isdigit():
+            brand_id = int(brand_id)
+        # copy brand fields into raw
+        raw["brand_id"] = brand_id
+        raw["brand_kor"] = br.get("brand_kor")
+        raw["brand_eng"] = br.get("brand_eng")
+        raw["brand"] = br.get("brand") or br.get("name")
+        raw["brand_likes"] = br.get("brand_likes")
 
-            # d) Pydantic 모델 생성
-            try:
-                product = ProductBase(**filtered)
-                products.append(product)
-            except Exception as e:
-                logger.error(f"Validation error for product {filtered.get('id')}: {e}")
-                continue
+        # 3) 합칠 모든 필드를 한번에 unpack
+        #    CombinedProduct는 ProductBase + BrandModel 상속이므로
+        #    raw 딕셔너리에 있는 모든 필드를 그대로 넘기면 됩니다.
+        try:
+            combined = CombinedProduct(**raw)
+            combined_list.append(combined)
+        except Exception as e:
+            logger.error(f"Validation error for combined product {prod_id}: {e}")
+            continue
 
-        return products
+    return combined_list
 
-    except Exception as e:
-        logger.error("Error in list_products", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"상품 목록 조회 중 오류: {e}"
-        )
 
 @app.get(
     "/product/{id}",
-    response_model=ProductBase,
+    response_model=CombinedProduct,
+    status_code=status.HTTP_200_OK
 )
-async def get_product(
-        id: int,
-        collection: AsyncIOMotorCollection = Depends(get_db)
+async def get_combined_product(
+        id: int = Path(..., description="조회할 상품의 ID"),
+        collection: AsyncIOMotorCollection = Depends(get_db),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db)
 ):
-    if collection is None:
+    """
+    단일 상품과 해당 브랜드 정보를 합쳐서 반환합니다.
+    """
+    # 1) 상품 조회
+    raw = await collection.find_one({"id": id})
+    br = await brand_coll.find_one({"id": id})
+    if not raw:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    # a) MongoDB _id → raw["id"]
+    oid = raw.pop("id", None)
+    if oid is not None:
+        raw_id = oid
+        raw["id"] = raw_id
+
+    if not br:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
+    # 2) 브랜드 조회
+
+    b_id = br.pop("id", None)
+    if b_id is not None:
+        b_id = oid
+        br["id"] = b_id
+    # b) 브랜드 필드 삽입
+    raw["brand_id"] = b_id
+    raw["brand_kor"] = br.get("brand_kor")
+    raw["brand_eng"] = br.get("brand_eng")
+    raw["brand"] = (br.get("brand") or br.get("name"))
+    raw["brand_likes"] = br.get("brand_likes")
+
+    # 3) CombinedProduct 인스턴스화
+    try:
+        combined = CombinedProduct(**raw)
+    except Exception as e:
+        logger.error(f"Validation error for combined product {id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="MongoDB 연결 오류"
-        )
-    product = await collection.find_one({"id": id})
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="데이터 검증 중 오류가 발생했습니다"
         )
 
-    brand_coll = collection.database.get_collection("brand")
-    if product.get("brand_id"):
-        brand_doc = await brand_coll.find_one({"brand_id": product.get("brand_id")})
-        product["brand"] = brand_doc.get("name") if brand_doc else None
-    product["id"] = int(product.get("id")) if isinstance(product.get("id"), str) and product.get(
-        "id").isdigit() else product.get("id")
-
-    return ProductBase(**product)
+    return combined
 
 
 @app.put(
