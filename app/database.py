@@ -1,8 +1,16 @@
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 
-MONGO_URL = "mongodb://localhost:27017"
-client = MongoClient(MONGO_URL)
-
-db = client["product"]  # 데이터베이스 이름
-product_collection = db["product"]  # 컬렉션 (테이블에 해당)
+MONGO_URI = (
+    "mongodb://root:mongodb_product@mongodb_product:27017"
+    "/product?authSource=admin"
+)
+MONGO_URI2 = (
+    "mongodb://root:mongodb_product@mongodb_product:27017"
+    "/brand?authSource=admin"
+)
+client = AsyncIOMotorClient(MONGO_URI)
+client2 = AsyncIOMotorClient(MONGO_URI2)
+db = client["product"]
+product_collection = db["product"]
+brand_collection=db['brand']
 
