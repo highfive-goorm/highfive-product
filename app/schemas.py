@@ -1,13 +1,16 @@
+# product/app/schemas.py
 from pydantic import BaseModel
 from typing import Optional
+
 
 class Brand(BaseModel):
     id: int
     brand_kor: Optional[str]
     brand_eng: Optional[str]
-    like_count: Optional[int]           # ← 실제 DB에 맞춤
+    like_count: Optional[int]  # 필드명 수정
     created_at: Optional[float]
     updated_at: Optional[float]
+
 
 class ProductBase(BaseModel):
     id: int
@@ -26,10 +29,11 @@ class ProductBase(BaseModel):
     price: Optional[float]
     created_at: Optional[float]
     updated_at: Optional[float]
-    brand_id: int  # ← brand_id는 상품 기준, 반드시 포함
+    brand_id: int  # brand_id는 필수
+
 
 class CombinedProduct(ProductBase):
-    # 브랜드 정보도 추가해서 한 번에 전달
+    # 브랜드 정보
     brand_kor: Optional[str]
     brand_eng: Optional[str]
-    brand_like_count: Optional[int]
+    brand_like_count: Optional[int]  # 필드명 수정
