@@ -5,7 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 from datetime import datetime
 from pydantic import BaseModel
 from .database import product_collection, brand_collection, db
-from .schemas import CombinedProduct, ProductBase, PaginatedProducts
+from .schemas import CombinedProduct, ProductBase, PaginatedProducts, BulkProduct
 from pymongo.errors import ServerSelectionTimeoutError
 import asyncio
 
@@ -35,6 +35,11 @@ async def ensure_mongo_indexes():
         try:
             await product_collection.create_index([("id",1)], unique=True)
             await brand_collection.create_index([("id",1)], unique=True)
+            
+            # major_category 필터용 인덱스
+            await product_collection.create_index(
+                [("major_category", 1)], name="idx_major_category"
+            )
             return
         except ServerSelectionTimeoutError:
             await asyncio.sleep(2)
@@ -51,6 +56,7 @@ purchase_collection = db["product_purchases"]
 @app.get("/product", response_model=PaginatedProducts)
 async def list_products(
     name: Optional[str] = Query(None, description="상품명 키워드"),
+    major_category: Optional[str] = Query(None, description="메이저 카테고리"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
     collection: AsyncIOMotorCollection = Depends(get_db),
@@ -60,6 +66,8 @@ async def list_products(
     query = {}
     if name:
         query["name"] = {"$regex": name, "$options": "i"}
+    if major_category:
+        query["major_category"] = major_category
 
     # 2) 전체 개수 조회
     total = await collection.count_documents(query)
@@ -75,15 +83,14 @@ async def list_products(
     # 5) 상품·브랜드 결합
     combined_list: List[CombinedProduct] = []
     for prod in products:
-        combined = {**prod}
-        brand_info = brand_map.get(prod["brand_id"])
-        if brand_info:
-            combined.update({
-                "brand_kor": brand_info["brand_kor"],
-                "brand_eng": brand_info["brand_eng"],
-                "brand_like_count": brand_info["like_count"],
+        data = prod.copy()
+        if brand := brand_map.get(prod["brand_id"]):
+            data.update({
+                "brand_kor": brand["brand_kor"],
+                "brand_eng": brand["brand_eng"],
+                "brand_like_count": brand["like_count"],
             })
-        combined_list.append(CombinedProduct(**combined))
+        combined_list.append(CombinedProduct(**data))
 
     # 6) total 과 items 함께 반환
     return PaginatedProducts(total=total, items=combined_list)
@@ -192,31 +199,20 @@ async def purchase_product(
 async def bulk_products(
     req: BulkRequest,
     collection: AsyncIOMotorCollection = Depends(get_db),
-    brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
 ):
     # 1) 상품 일괄 조회
     products = await collection.find({"id": {"$in": req.product_ids}}).to_list(length=None)
 
-    # 2) 브랜드 정보 한 번에 조회
-    brand_ids = list({p["brand_id"] for p in products})
-    brands = await brand_coll.find(
-        {"id": {"$in": brand_ids}}
-    ).to_list(length=None)
-    brand_map = {b["id"]: b for b in brands}
-
     # 3) 필요한 필드만 추출하여 반환
-    result = []
-    for prod in products:
-        brand_info = brand_map.get(prod["brand_id"], {})
-        result.append({
-            "id": prod["id"],
-            "name": prod["name"],
-            "img_url": prod["img_url"],
-            "discount": prod["discount"],
-            "price": prod["price"],
-            "discounted_price": prod["discounted_price"],
-            "brand_id": prod["brand_id"],
-            "brand_kor": brand_info.get("brand_kor", ""),
-            "brand_eng": brand_info.get("brand_eng", ""),
-        })
-    return result
+    return [
+        BulkProduct(
+            id=prod["id"],
+            name=prod.get("name"),
+            img_url=prod.get("img_url"),
+            discount=prod.get("discount", 0),
+            price=prod.get("price", 0),
+            discounted_price=prod.get("discounted_price", 0),
+            brand_id=prod.get("brand_id"),
+        )
+        for prod in products
+    ]

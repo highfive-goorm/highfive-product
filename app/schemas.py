@@ -36,3 +36,12 @@ class CombinedProduct(ProductBase, Brand):
 class PaginatedProducts(BaseModel):
     total: int
     items: List[CombinedProduct]
+
+class BulkProduct(BaseModel):
+    id: int
+    name: Optional[str] = None
+    img_url: Optional[str] = None
+    discount: Optional[float] = 0
+    price: Optional[float] = 0
+    discounted_price: Optional[float] = 0
+    brand_id: Optional[int] = None
