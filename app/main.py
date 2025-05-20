@@ -195,7 +195,7 @@ async def purchase_product(
     await product_collection.update_one({"id": id}, {"$inc": {"purchase_count": 1}})
 
 
-@app.post("/product/bulk", response_model=List[dict])
+@app.post("/product/bulk", response_model=List[BulkProduct])
 async def bulk_products(
     req: BulkRequest,
     collection: AsyncIOMotorCollection = Depends(get_db),
