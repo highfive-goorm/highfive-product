@@ -40,6 +40,9 @@ async def ensure_mongo_indexes():
             await product_collection.create_index(
                 [("major_category", 1)], name="idx_major_category"
             )
+            await product_collection.create_index(
+                [("gender", 1)], name="idx_gender"
+            )
             return
         except ServerSelectionTimeoutError:
             await asyncio.sleep(2)
@@ -57,6 +60,7 @@ purchase_collection = db["product_purchases"]
 async def list_products(
     name: Optional[str] = Query(None, description="상품명 키워드"),
     major_category: Optional[str] = Query(None, description="메이저 카테고리"),
+    gender: Optional[str] = Query(None, description="성별 (M/F/U 등)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
     collection: AsyncIOMotorCollection = Depends(get_db),
@@ -68,6 +72,8 @@ async def list_products(
         query["name"] = {"$regex": name, "$options": "i"}
     if major_category:
         query["major_category"] = major_category
+    if gender:
+        query["gender"] = gender
 
     # 2) 전체 개수 조회
     total = await collection.count_documents(query)
