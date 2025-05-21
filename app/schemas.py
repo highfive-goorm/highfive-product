@@ -45,3 +45,6 @@ class BulkProduct(BaseModel):
     price: Optional[float] = 0
     discounted_price: Optional[float] = 0
     brand_id: Optional[int] = None
+
+class BulkRequest(BaseModel):
+    product_ids: List[int]
