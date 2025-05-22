@@ -211,20 +211,31 @@ async def purchase_product(
 @app.post("/product/bulk", response_model=List[BulkProduct])
 async def bulk_products(
     req: BulkRequest,
-    collection: AsyncIOMotorCollection = Depends(get_db),
+    prod_coll: AsyncIOMotorCollection = Depends(get_db),
+    brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
 ):
     # 1) 상품 일괄 조회
-    products = await collection.find({"id": {"$in": req.product_ids}}).to_list(length=None)
+    products = await prod_coll.find({"id": {"$in": req.product_ids}}).to_list(length=None)
 
-    # 2) 필요한 필드만 추출
-    return [
-        BulkProduct(
-            id=prod["id"],
-            name=prod.get("name"),
-            img_url=prod.get("img_url"),
-            discount=prod.get("discount", 0),
-            price=prod.get("price", 0),
-            discounted_price=prod.get("discounted_price", 0),
-            brand_id=prod.get("brand_id"),
-        ) for prod in products
-    ]
+    # 2) 관련 브랜드 일괄 조회
+    brand_ids = [p["brand_id"] for p in products if p.get("brand_id") is not None]
+    brands = await brand_coll.find({"id": {"$in": brand_ids}}).to_list(length=None)
+    brand_map = {b["id"]: b for b in brands}
+
+    # 3) BulkProduct 객체 생성 (brand_kor, brand_eng, brand_like_count 포함)
+    result: List[BulkProduct] = []
+    for p in products:
+        b = brand_map.get(p["brand_id"], {})
+        combined = {
+            **p,
+            "brand_kor": b.get("brand_kor"),
+            "brand_eng": b.get("brand_eng"),
+        }
+        try:
+            result.append(BulkProduct(**combined))
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"데이터 직렬화 오류: {e}"
+            )
+    return result
