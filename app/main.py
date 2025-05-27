@@ -1,5 +1,7 @@
 # File: product/app/main.py
 
+# File: product/app/main.py
+
 from typing import List, Optional
 import time
 import os
@@ -25,19 +27,24 @@ os.makedirs(LOG_DIR, exist_ok=True)
 configure_logging(log_file=os.path.join(LOG_DIR, "product_service.log"))
 logger = logging.getLogger("product")
 
+
 # Dependency overrides
 async def get_db() -> AsyncIOMotorCollection:
     return product_collection
 
+
 async def get_brand_db() -> AsyncIOMotorCollection:
     return brand_collection
+
 
 async def get_user_id(x_user_id: str = Header(..., description="사용자 ID")):
     return x_user_id
 
+
 # Auxiliary collections for logging
 view_collection = db["product_views"]
 purchase_collection = db["product_purchases"]
+
 
 # Middleware: 한 요청당 한 줄 로깅
 @app.middleware("http")
@@ -51,9 +58,9 @@ async def log_requests(request: Request, call_next):
     if request.url.path == "/product":
         qp = request.query_params
         params_info = (
-            f"\tname={qp.get('name','')}"
-            f"\tmajor_category={qp.get('major_category','')}"
-            f"\tgender={qp.get('gender','')}"
+            f"\tname={qp.get('name', '')}"
+            f"\tmajor_category={qp.get('major_category', '')}"
+            f"\tgender={qp.get('gender', '')}"
         )
     msg = (
         f"api_request"
@@ -65,6 +72,7 @@ async def log_requests(request: Request, call_next):
     )
     logger.info(msg)
     return response
+
 
 @app.on_event("startup")
 async def ensure_mongo_indexes():
@@ -79,16 +87,17 @@ async def ensure_mongo_indexes():
             await asyncio.sleep(2)
     raise RuntimeError("MongoDB 연결 실패 - 인덱스 생성 불가")
 
+
 # Endpoints
 @app.get("/product", response_model=PaginatedProducts)
 async def list_products(
-    name: Optional[str] = Query(None, description="상품명 키워드"),
-    major_category: Optional[str] = Query(None, description="메이저 카테고리"),
-    gender: Optional[str] = Query(None, description="성별 (M/F/U 등)"),
-    page: int = Query(1, ge=1, description="페이지 번호"),
-    size: int = Query(10, ge=1, le=100, description="페이지 크기"),
-    collection: AsyncIOMotorCollection = Depends(get_db),
-    brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
+        name: Optional[str] = Query(None, description="상품명 키워드"),
+        major_category: Optional[str] = Query(None, description="메이저 카테고리"),
+        gender: Optional[str] = Query(None, description="성별 (M/F/U 등)"),
+        page: int = Query(1, ge=1, description="페이지 번호"),
+        size: int = Query(10, ge=1, le=100, description="페이지 크기"),
+        collection: AsyncIOMotorCollection = Depends(get_db),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
 ):
     query = {}
     if name:
@@ -118,11 +127,12 @@ async def list_products(
 
     return PaginatedProducts(total=total, items=combined_list)
 
+
 @app.get("/product/{id}", response_model=CombinedProduct)
 async def get_product(
-    id: int = Path(..., description="조회할 상품의 ID"),
-    collection: AsyncIOMotorCollection = Depends(get_db),
-    brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
+        id: int = Path(..., description="조회할 상품의 ID"),
+        collection: AsyncIOMotorCollection = Depends(get_db),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
 ):
     prod = await collection.find_one({"id": id})
     if not prod:
@@ -142,10 +152,11 @@ async def get_product(
         print(f"Error parsing CombinedProduct: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="데이터 변환 오류")
 
+
 @app.post("/product", response_model=ProductBase, status_code=status.HTTP_201_CREATED)
 async def create_product(
-    product: ProductBase,
-    collection: AsyncIOMotorCollection = Depends(get_db),
+        product: ProductBase,
+        collection: AsyncIOMotorCollection = Depends(get_db),
 ):
     now = datetime.utcnow().timestamp()
     doc = product.dict(exclude_unset=True)
@@ -153,11 +164,12 @@ async def create_product(
     await collection.update_one({"id": doc["id"]}, {"$setOnInsert": doc}, upsert=True)
     return ProductBase(**doc)
 
+
 @app.put("/product/{id}", response_model=ProductBase)
 async def update_product(
-    id: int,
-    update: ProductBase,
-    collection: AsyncIOMotorCollection = Depends(get_db),
+        id: int,
+        update: ProductBase,
+        collection: AsyncIOMotorCollection = Depends(get_db),
 ):
     update_data = {k: v for k, v in update.dict(exclude_unset=True).items() if v != ""}
     if not update_data:
@@ -173,19 +185,21 @@ async def update_product(
     updated_doc = await collection.find_one({"id": id})
     return ProductBase(**updated_doc)
 
+
 @app.delete("/product/{id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(
-    id: int,
-    collection: AsyncIOMotorCollection = Depends(get_db),
+        id: int,
+        collection: AsyncIOMotorCollection = Depends(get_db),
 ):
     result = await collection.delete_one({"id": id})
     if result.deleted_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+
 @app.post("/product/{id}/view", status_code=status.HTTP_204_NO_CONTENT)
 async def view_product(
-    id: int,
-    user_id: str = Depends(get_user_id),
+        id: int,
+        user_id: str = Depends(get_user_id),
 ):
     now = datetime.utcnow().timestamp()
     await view_collection.insert_one({
@@ -194,11 +208,12 @@ async def view_product(
         "viewed_at": now
     })
     await product_collection.update_one({"id": id}, {"$inc": {"view_count": 1}})
-    
+
+
 @app.post("/product/{id}/purchase", status_code=status.HTTP_204_NO_CONTENT)
 async def purchase_product(
-    id: int,
-    user_id: str = Depends(get_user_id),
+        id: int,
+        user_id: str = Depends(get_user_id),
 ):
     now = datetime.utcnow().timestamp()
     await purchase_collection.insert_one({
@@ -208,11 +223,12 @@ async def purchase_product(
     })
     await product_collection.update_one({"id": id}, {"$inc": {"purchase_count": 1}})
 
+
 @app.post("/product/bulk", response_model=List[BulkProduct])
 async def bulk_products(
-    req: BulkRequest,
-    prod_coll: AsyncIOMotorCollection = Depends(get_db),
-    brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
+        req: BulkRequest,
+        prod_coll: AsyncIOMotorCollection = Depends(get_db),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
 ):
     # 1) 상품 일괄 조회
     products = await prod_coll.find({"id": {"$in": req.product_ids}}).to_list(length=None)
