@@ -1,14 +1,18 @@
 from typing import Optional, List
 from pydantic import BaseModel
 
+
 class Brand(BaseModel):
     id: int
     brand_kor: Optional[str] = None
     brand_eng: Optional[str] = None
     like_count: Optional[int] = 0
-    created_at: Optional[float]
-    updated_at: Optional[float]
+    # created_at: Optional[float]
+    # updated_at: Optional[float]
 
+class UserLikedBrandsResponse(BaseModel):
+    user_id: str
+    like_brands: List[Brand]
 class ProductBase(BaseModel):
     id: int
     name: Optional[str] = None
@@ -28,14 +32,17 @@ class ProductBase(BaseModel):
     updated_at: Optional[float]
     brand_id: Optional[int] = None
 
+
 class CombinedProduct(ProductBase, Brand):
     brand_kor: Optional[str] = None
     brand_eng: Optional[str] = None
     brand_like_count: Optional[int] = 0
 
+
 class PaginatedProducts(BaseModel):
     total: int
     items: List[CombinedProduct]
+
 
 class BulkProduct(BaseModel):
     id: int
@@ -48,5 +55,21 @@ class BulkProduct(BaseModel):
     brand_kor: Optional[str] = None
     brand_eng: Optional[str] = None
 
+
+class LikeProduct(BaseModel):
+    id:Optional[int]=0
+    name:Optional[str]=None
+    img_url:Optional[str]=None
+
+
+class UserLikedProductsResponse(BaseModel):
+    user_id: str
+    like_products: List[LikeProduct]
 class BulkRequest(BaseModel):
     product_ids: List[int]
+
+
+class LikeRequest(BaseModel):
+    user_id: str
+
+
