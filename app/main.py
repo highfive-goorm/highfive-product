@@ -8,13 +8,16 @@ import os
 import logging
 
 from fastapi import FastAPI, Query, Depends, Path, HTTPException, Header, status, Request
-from motor.motor_asyncio import AsyncIOMotorCollection
+from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from datetime import datetime
 from pymongo.errors import ServerSelectionTimeoutError
 import asyncio
 
-from .database import product_collection, brand_collection, db
-from .schemas import CombinedProduct, ProductBase, PaginatedProducts, BulkProduct, BulkRequest
+from redis.asyncio import Redis
+
+from .database import product_collection, brand_collection, db, redis, likes_coll, brand_likes_coll
+from .schemas import CombinedProduct, ProductBase, PaginatedProducts, BulkProduct, BulkRequest, LikeRequest, \
+    UserLikedProductsResponse, UserLikedBrandsResponse
 
 # Logging setup
 from shared.logging_config import configure_logging
@@ -35,6 +38,18 @@ async def get_db() -> AsyncIOMotorCollection:
 
 async def get_brand_db() -> AsyncIOMotorCollection:
     return brand_collection
+
+
+async def get_brand_likes_coll() -> AsyncIOMotorCollection:
+    return brand_likes_coll
+
+
+async def get_redis() -> Redis:
+    return redis
+
+
+async def get_likes_db() -> AsyncIOMotorCollection:
+    return likes_coll
 
 
 async def get_user_id(x_user_id: str = Header(..., description="사용자 ID")):
@@ -165,6 +180,107 @@ async def create_product(
     return ProductBase(**doc)
 
 
+@app.post(
+    "/product/{id}/like",
+    status_code=status.HTTP_201_CREATED,
+    summary="상품 좋아요"
+)
+async def like_product(
+        id: int,
+        body: LikeRequest,
+        like_coll: AsyncIOMotorDatabase = Depends(get_likes_db),
+        redis: Redis = Depends(get_redis),
+        product_collection: AsyncIOMotorDatabase = Depends(get_db)
+):
+    # 1) 이미 좋아요 했는지 확인
+    exists = await like_coll.find_one({
+        "id": id,
+        "user_id": body.user_id
+    })
+    if exists:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="이미 좋아요한 상태입니다.")
+
+    # 2) MongoDB에 기록
+    await likes_coll.insert_one({
+        "id": id,
+        "user_id": body.user_id,
+        "created_at": datetime.utcnow()
+    })
+    update_result = await product_collection.update_one(
+        {"id": id},
+        {"$inc": {"like_count": 1}}
+    )
+    if update_result.matched_count == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "상품을 찾을 수 없습니다.")
+    # 3) Redis set에 추가
+    await redis.sadd(f"likes:{id}", body.user_id)
+
+    return {"message": "좋아요 처리되었습니다."}
+
+
+@app.delete(
+    "/product/{id}/like/{user_id}",
+    status_code=status.HTTP_200_OK,
+    summary="상품 좋아요 취소"
+)
+async def unlike_product(
+        id: int,
+        user_id: str,
+        likes_coll: AsyncIOMotorCollection = Depends(get_likes_db),
+        redis: Redis = Depends(get_redis),
+        product_collection: AsyncIOMotorCollection = Depends(get_db)
+):
+    delete_result = await likes_coll.delete_one({"id": id, "user_id": user_id})
+    if delete_result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="좋아요 내역이 없습니다."
+        )
+    update_result = await product_collection.update_one(
+        {"id": id},
+        {"$inc": {"like_count": -1}}
+    )
+    if update_result.matched_count == 0:
+        # 삭제는 됐지만, 상품 자체가 없으면 복구용으로 1 되돌리기
+        await product_collection.update_one({"id": id}, {"$inc": {"like_count": -1}})
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="상품을 찾을 수 없습니다."
+        )
+    await redis.srem(f"likes:{id}", user_id)
+    return {"message": "좋아요가 취소되었습니다."}
+
+
+@app.get(
+    "/product/like/count/{user_id}",
+    response_model=UserLikedProductsResponse,
+    summary="사용자가 좋아요한 상품 ID 리스트 조회"
+)
+async def get_user_liked_products(
+        user_id: str,
+        likes_coll: AsyncIOMotorDatabase = Depends(get_likes_db),
+        product_collection: AsyncIOMotorCollection = Depends(get_db)
+):
+    like_docs = await likes_coll.find({"user_id": user_id}).to_list()
+    if not like_docs:
+        raise HTTPException(status_code=200, detail="좋아요 내역이 없습니다.")
+
+    # 2) ID 리스트 추출 (중복 제거를 원하면 set(...) 사용)
+    ids = [doc["id"] for doc in like_docs]
+
+    # 3) products 컬렉션에서 id, name, img_url 필드만 Projection 하여 조회
+    prod_docs = await product_collection.find(
+        {"id": {"$in": ids}},
+        {"id": 1, "name": 1, "img_url": 1}
+    ).to_list(length=None)
+
+    # 4) 원래 users liked 순으로 정렬하려면:
+    prod_map = {p["id"]: p for p in prod_docs}
+    ordered = [prod_map[i] for i in ids if i in prod_map]
+
+    return UserLikedProductsResponse(user_id=user_id, like_products=ordered)
+
+
 @app.put("/product/{id}", response_model=ProductBase)
 async def update_product(
         id: int,
@@ -255,3 +371,113 @@ async def bulk_products(
                 detail=f"데이터 직렬화 오류: {e}"
             )
     return result
+
+
+# brand 좋아요
+@app.post(
+    "/brand/{id}/like",
+    status_code=status.HTTP_201_CREATED,
+    summary="브랜드 좋아요"
+)
+async def like_brand(
+        id: int,
+        body: LikeRequest,
+        brand_likes_coll: AsyncIOMotorCollection = Depends(get_brand_likes_coll),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
+        redis: Redis = Depends(get_redis),
+):
+    # 이미 좋아요했는지
+    if await brand_likes_coll.find_one({"id": id, "user_id": body.user_id}):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "이미 좋아요한 상태입니다.")
+
+    # 1) 좋아요 기록
+    await brand_likes_coll.insert_one({
+        "id": id,
+        "user_id": body.user_id,
+        "created_at": datetime.utcnow()
+    })
+
+    # 2) brands 컬렉션 like_count 증가
+    res = await brand_coll.update_one(
+        {"id": id},
+        {"$inc": {"like_count": 1}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "브랜드를 찾을 수 없습니다.")
+
+    # 3) Redis에도 추가
+    await redis.sadd(f"brand:{id}:like_count", body.user_id)
+
+    return {"message": "브랜드 좋아요 처리되었습니다."}
+
+
+# ─── 브랜드 좋아요 취소 ─────────────────────────────────
+
+@app.delete(
+    "/brand/{id}/like/{user_id}",
+    status_code=status.HTTP_200_OK,
+    summary="브랜드 좋아요 취소"
+)
+async def unlike_brand(
+        id: int,
+        user_id: str,
+        brand_likes_coll: AsyncIOMotorCollection = Depends(get_brand_likes_coll),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
+        redis: Redis = Depends(get_redis),
+):
+    # 1) 좋아요 기록 삭제
+    result = await brand_likes_coll.delete_one({"id": id, "user_id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "좋아요 내역이 없습니다.")
+
+    # 2) like_count 감소
+    res = await brand_coll.update_one(
+        {"id": id},
+        {"$inc": {"like_count": -1}}
+    )
+    if res.matched_count == 0:
+        # 삭제는 됐지만 브랜드가 없으면 복구
+        await brand_likes_coll.insert_one({
+            "id": id,
+            "user_id": user_id,
+            "created_at": datetime.utcnow()
+        })
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "브랜드를 찾을 수 없습니다.")
+
+    # 3) Redis에서도 제거
+    await redis.srem(f"brand:{id}:like_count", user_id)
+
+    return {"message": "브랜드 좋아요가 취소되었습니다."}
+
+
+# ─── 사용자가 좋아요한 브랜드 리스트 조회 ────────────────────────
+
+@app.get(
+    "/brand/like/count/{user_id}",
+    response_model=UserLikedBrandsResponse,
+    summary="사용자가 좋아요한 브랜드 리스트 조회"
+)
+async def get_user_liked_brands(
+        user_id: str,
+        brand_likes_coll: AsyncIOMotorCollection = Depends(get_brand_likes_coll),
+        brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
+):
+    # 1) 사용자의 좋아요 기록 조회
+    docs = await brand_likes_coll.find({"user_id": user_id}).to_list(length=None)
+    if not docs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "좋아요 내역이 없습니다.")
+
+    # 2) 브랜드 ID 리스트
+    ids = [doc["id"] for doc in docs]
+
+    # 3) brands 컬렉션에서 id, name, img_url 프로젝션하여 조회
+    prods = await brand_coll.find(
+        {"id": {"$in": ids}},
+        {"id": 1, "brand_kor": 1, "brand_eng": 1,"like_count":1}
+    ).to_list(length=None)
+
+    # 4) 좋아요 순(저장 순) 그대로 정렬
+    prod_map = {b["id"]: b for b in prods}
+    ordered = [prod_map[i] for i in ids if i in prod_map]
+
+    return UserLikedBrandsResponse(user_id=user_id, like_brands=ordered)
