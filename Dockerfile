@@ -1,21 +1,38 @@
-# 1. 공식 Python 이미지 사용
-FROM python:3.12
+FROM python:3.12-slim-bookworm
 
-# 1-1. 타임존 설정 (tzdata 설치 + Asia/Seoul로 링크)
-RUN apt-get update && apt-get install -y tzdata \
-  && ln -snf /usr/share/zoneinfo/Asia/Seoul /etc/localtime \
-  && echo "Asia/Seoul" > /etc/timezone \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
+# 작업 환경 변수 설정
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Seoul
 
-# 2. 작업 디렉토리 설정
+# 런타임에 필요한 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    tzdata \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 이미지 내 작업 디렉토리 설정
 WORKDIR /app
 
-# 3. 의존성 설치
+# requirements.txt 복사 및 의존성 패키지 설치
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
-# 4. 전체 앱 복사
-COPY . /app
+# 애플리케이션 소스 코드 복사
+COPY app/ ./app/
+COPY shared/ ./shared/
 
-# 5. FastAPI 실행 (main.py 안에 app 인스턴스가 있어야 함)
+# Python이 /app 내의 shared 모듈을 찾도록 PYTHONPATH 설정
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
+# Non-root 사용자 생성 및 설정
+RUN useradd --system --create-home appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# 포트 설정
+EXPOSE 8001
+
+# 서비스 기동
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
