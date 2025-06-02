@@ -64,6 +64,10 @@ purchase_collection = db["product_purchases"]
 # Middleware: 한 요청당 한 줄 로깅
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if request.url.path == "/health":
+        response = await call_next(request)
+        return response
+    
     start = time.time()
     response = await call_next(request)
     elapsed_ms = (time.time() - start) * 1000
@@ -102,6 +106,9 @@ async def ensure_mongo_indexes():
             await asyncio.sleep(2)
     raise RuntimeError("MongoDB 연결 실패 - 인덱스 생성 불가")
 
+@app.get("/health", status_code=200)
+async def health_check():
+    return {"status": "ok"}
 
 # Endpoints
 @app.get("/product", response_model=PaginatedProducts)
