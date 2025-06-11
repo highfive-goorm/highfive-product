@@ -13,9 +13,9 @@ from datetime import datetime
 from pymongo.errors import ServerSelectionTimeoutError
 import asyncio
 
-from redis.asyncio import Redis
+# from redis.asyncio import Redis
 
-from .database import product_collection, brand_collection, db, redis, likes_coll, brand_likes_coll
+from .database import product_collection, brand_collection, db, likes_coll, brand_likes_coll # redis
 from .schemas import CombinedProduct, ProductBase, PaginatedProducts, BulkProduct, BulkRequest, LikeRequest, \
     UserLikedProductsResponse, UserLikedBrandsResponse
 
@@ -44,8 +44,8 @@ async def get_brand_likes_coll() -> AsyncIOMotorCollection:
     return brand_likes_coll
 
 
-async def get_redis() -> Redis:
-    return redis
+# async def get_redis() -> Redis:
+#     return redis
 
 
 async def get_likes_db() -> AsyncIOMotorCollection:
@@ -116,6 +116,7 @@ async def list_products(
         name: Optional[str] = Query(None, description="상품명 키워드"),
         major_category: Optional[str] = Query(None, description="메이저 카테고리"),
         gender: Optional[str] = Query(None, description="성별 (M/F/U 등)"),
+        brand_id: Optional[int] = Query(None, description="브랜드 ID"),
         page: int = Query(1, ge=1, description="페이지 번호"),
         size: int = Query(10, ge=1, le=100, description="페이지 크기"),
         collection: AsyncIOMotorCollection = Depends(get_db),
@@ -128,6 +129,8 @@ async def list_products(
         query["major_category"] = major_category
     if gender:
         query["gender"] = gender
+    if brand_id is not None:
+        query["brand_id"] = brand_id
 
     total = await collection.count_documents(query)
     skip = (page - 1) * size
@@ -196,7 +199,7 @@ async def like_product(
         id: int,
         body: LikeRequest,
         like_coll: AsyncIOMotorDatabase = Depends(get_likes_db),
-        redis: Redis = Depends(get_redis),
+        # redis: Redis = Depends(get_redis),
         product_collection: AsyncIOMotorDatabase = Depends(get_db)
 ):
     # 1) 이미 좋아요 했는지 확인
@@ -220,7 +223,7 @@ async def like_product(
     if update_result.matched_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "상품을 찾을 수 없습니다.")
     # 3) Redis set에 추가
-    await redis.sadd(f"likes:{id}", body.user_id)
+    # await redis.sadd(f"likes:{id}", body.user_id)
 
     return {"message": "좋아요 처리되었습니다."}
 
@@ -234,7 +237,7 @@ async def unlike_product(
         id: int,
         user_id: str,
         likes_coll: AsyncIOMotorCollection = Depends(get_likes_db),
-        redis: Redis = Depends(get_redis),
+        # redis: Redis = Depends(get_redis),
         product_collection: AsyncIOMotorCollection = Depends(get_db)
 ):
     delete_result = await likes_coll.delete_one({"id": id, "user_id": user_id})
@@ -254,7 +257,7 @@ async def unlike_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="상품을 찾을 수 없습니다."
         )
-    await redis.srem(f"likes:{id}", user_id)
+    # await redis.srem(f"likes:{id}", user_id)
     return {"message": "좋아요가 취소되었습니다."}
 
 
@@ -391,7 +394,7 @@ async def like_brand(
         body: LikeRequest,
         brand_likes_coll: AsyncIOMotorCollection = Depends(get_brand_likes_coll),
         brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
-        redis: Redis = Depends(get_redis),
+        # redis: Redis = Depends(get_redis),
 ):
     # 이미 좋아요했는지
     if await brand_likes_coll.find_one({"id": id, "user_id": body.user_id}):
@@ -413,7 +416,7 @@ async def like_brand(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "브랜드를 찾을 수 없습니다.")
 
     # 3) Redis에도 추가
-    await redis.sadd(f"brand:{id}:like_count", body.user_id)
+    # await redis.sadd(f"brand:{id}:like_count", body.user_id)
 
     return {"message": "브랜드 좋아요 처리되었습니다."}
 
@@ -430,7 +433,7 @@ async def unlike_brand(
         user_id: str,
         brand_likes_coll: AsyncIOMotorCollection = Depends(get_brand_likes_coll),
         brand_coll: AsyncIOMotorCollection = Depends(get_brand_db),
-        redis: Redis = Depends(get_redis),
+        # redis: Redis = Depends(get_redis),
 ):
     # 1) 좋아요 기록 삭제
     result = await brand_likes_coll.delete_one({"id": id, "user_id": user_id})
@@ -452,7 +455,7 @@ async def unlike_brand(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "브랜드를 찾을 수 없습니다.")
 
     # 3) Redis에서도 제거
-    await redis.srem(f"brand:{id}:like_count", user_id)
+    # await redis.srem(f"brand:{id}:like_count", user_id)
 
     return {"message": "브랜드 좋아요가 취소되었습니다."}
 
