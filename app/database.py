@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from redis.asyncio import Redis
+# from redis.asyncio import Redis
 from dotenv import load_dotenv, find_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -17,5 +17,5 @@ product_collection = db["product"]
 brand_collection = db["brand"]
 likes_coll = db['likes']
 brand_likes_coll = db['brand_likes']
-redis_url = "redis://host.docker.internal:6379"
-redis = Redis.from_url(redis_url, decode_responses=True)
+# redis_url = f"redis://{os.getenv('REDIS_URL')}"
+# redis = Redis.from_url(redis_url, decode_responses=True)
