@@ -1,7 +1,4 @@
 # File: product/app/main.py
-
-# File: product/app/main.py
-
 from typing import List, Optional
 import time
 import os
@@ -183,7 +180,7 @@ async def create_product(
         product: ProductBase,
         collection: AsyncIOMotorCollection = Depends(get_db),
 ):
-    now = datetime.utcnow().timestamp()
+    now = datetime.utcnow().isoformat() + "Z"
     doc = product.dict(exclude_unset=True)
     doc.update({"created_at": now, "updated_at": now})
     await collection.update_one({"id": doc["id"]}, {"$setOnInsert": doc}, upsert=True)
@@ -214,7 +211,7 @@ async def like_product(
     await likes_coll.insert_one({
         "id": id,
         "user_id": body.user_id,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.utcnow().isoformat() + "Z"
     })
     update_result = await product_collection.update_one(
         {"id": id},
@@ -304,7 +301,7 @@ async def update_product(
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
         return ProductBase(**existing)
 
-    update_data["updated_at"] = datetime.utcnow().timestamp()
+    update_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
     result = await collection.update_one({"id": id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -327,7 +324,7 @@ async def view_product(
         id: int,
         user_id: str = Depends(get_user_id),
 ):
-    now = datetime.utcnow().timestamp()
+    now = datetime.utcnow().isoformat() + "Z"
     await view_collection.insert_one({
         "user_id": user_id,
         "product_id": id,
@@ -341,7 +338,7 @@ async def purchase_product(
         id: int,
         user_id: str = Depends(get_user_id),
 ):
-    now = datetime.utcnow().timestamp()
+    now = datetime.utcnow().isoformat() + "Z"
     await purchase_collection.insert_one({
         "user_id": user_id,
         "product_id": id,
@@ -404,7 +401,7 @@ async def like_brand(
     await brand_likes_coll.insert_one({
         "id": id,
         "user_id": body.user_id,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.utcnow().isoformat() + "Z"
     })
 
     # 2) brands 컬렉션 like_count 증가
@@ -450,7 +447,7 @@ async def unlike_brand(
         await brand_likes_coll.insert_one({
             "id": id,
             "user_id": user_id,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow().isoformat() + "Z"
         })
         raise HTTPException(status.HTTP_404_NOT_FOUND, "브랜드를 찾을 수 없습니다.")
 

@@ -13,6 +13,8 @@ class Brand(BaseModel):
 class UserLikedBrandsResponse(BaseModel):
     user_id: str
     like_brands: List[Brand]
+
+    
 class ProductBase(BaseModel):
     id: int
     name: Optional[str] = None
@@ -28,8 +30,8 @@ class ProductBase(BaseModel):
     sub_category: Optional[str] = None
     rank: Optional[int] = None
     price: Optional[float] = 0
-    created_at: Optional[float]
-    updated_at: Optional[float]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     brand_id: Optional[int] = None
 
 
@@ -71,5 +73,3 @@ class BulkRequest(BaseModel):
 
 class LikeRequest(BaseModel):
     user_id: str
-
-
