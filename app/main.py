@@ -180,11 +180,12 @@ async def create_product(
         product: ProductBase,
         collection: AsyncIOMotorCollection = Depends(get_db),
 ):
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.utcnow()
     doc = product.dict(exclude_unset=True)
     doc.update({"created_at": now, "updated_at": now})
     await collection.update_one({"id": doc["id"]}, {"$setOnInsert": doc}, upsert=True)
-    return ProductBase(**doc)
+    created_doc = await collection.find_one({"id": doc["id"]})
+    return ProductBase(**created_doc)
 
 
 @app.post(
@@ -211,7 +212,7 @@ async def like_product(
     await likes_coll.insert_one({
         "id": id,
         "user_id": body.user_id,
-        "created_at": datetime.utcnow().isoformat() + "Z"
+        "created_at": datetime.utcnow()
     })
     update_result = await product_collection.update_one(
         {"id": id},
@@ -248,8 +249,12 @@ async def unlike_product(
         {"$inc": {"like_count": -1}}
     )
     if update_result.matched_count == 0:
-        # 삭제는 됐지만, 상품 자체가 없으면 복구용으로 1 되돌리기
-        await product_collection.update_one({"id": id}, {"$inc": {"like_count": -1}})
+        # 롤백: 상품이 존재하지 않아 like_count를 줄이지 못했으므로, 삭제했던 좋아요 기록을 다시 추가합니다.
+        await likes_coll.insert_one({
+            "id": id,
+            "user_id": user_id,
+            "created_at": datetime.utcnow()
+        })
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="상품을 찾을 수 없습니다."
@@ -301,7 +306,7 @@ async def update_product(
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
         return ProductBase(**existing)
 
-    update_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    update_data["updated_at"] = datetime.utcnow()
     result = await collection.update_one({"id": id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -324,7 +329,7 @@ async def view_product(
         id: int,
         user_id: str = Depends(get_user_id),
 ):
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.utcnow()
     await view_collection.insert_one({
         "user_id": user_id,
         "product_id": id,
@@ -338,7 +343,7 @@ async def purchase_product(
         id: int,
         user_id: str = Depends(get_user_id),
 ):
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.utcnow()
     await purchase_collection.insert_one({
         "user_id": user_id,
         "product_id": id,
@@ -401,7 +406,7 @@ async def like_brand(
     await brand_likes_coll.insert_one({
         "id": id,
         "user_id": body.user_id,
-        "created_at": datetime.utcnow().isoformat() + "Z"
+        "created_at": datetime.utcnow()
     })
 
     # 2) brands 컬렉션 like_count 증가
@@ -447,7 +452,7 @@ async def unlike_brand(
         await brand_likes_coll.insert_one({
             "id": id,
             "user_id": user_id,
-            "created_at": datetime.utcnow().isoformat() + "Z"
+            "created_at": datetime.utcnow()
         })
         raise HTTPException(status.HTTP_404_NOT_FOUND, "브랜드를 찾을 수 없습니다.")
 

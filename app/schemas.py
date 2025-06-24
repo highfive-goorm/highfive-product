@@ -1,5 +1,6 @@
 from typing import Optional, List
 from pydantic import BaseModel
+from datetime import datetime
 
 
 class Brand(BaseModel):
@@ -30,8 +31,8 @@ class ProductBase(BaseModel):
     sub_category: Optional[str] = None
     rank: Optional[int] = None
     price: Optional[float] = 0
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     brand_id: Optional[int] = None
 
 
