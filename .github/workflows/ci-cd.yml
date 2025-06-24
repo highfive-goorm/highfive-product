@@ -159,7 +159,7 @@ jobs:
           path: 'config-repo'
       - name: Update manifest file
         run: |
-          sed -i -E "s|^(\s*image:\s*).*|\1326536620954.dkr.ecr.ap-northeast-2.amazonaws.com/highfive/highfive-product:${{ needs.build.outputs.version_tag }}|" config-repo/highfive-product-service.yaml
+          sed -i -E "s|^(\s*image:\s*).*|\1326536620954.dkr.ecr.ap-northeast-2.amazonaws.com/highfive/highfive-product:${{ needs.build.outputs.version_tag }}|" config-repo/product/highfive-product-service.yaml
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
