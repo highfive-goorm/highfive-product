@@ -165,7 +165,7 @@ jobs:
         with:
           commit_message: "Deploy image ${{ needs.build.outputs.version_tag }} for highfive-product-service"
           repository: 'config-repo'
-          file_pattern: 'highfive-product-service.yaml'
+          file_pattern: 'product/highfive-product-service.yaml'
 
   # ==========================================================
   # JOB 6: 워크플로우 실패 시 알림
